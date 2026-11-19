@@ -11,14 +11,14 @@ $apiKey  = 'ollama';
 $baseUrl = 'http://127.0.0.1:11434/v1';
 $model   = 'llama3.2:1b';
 $allowedModels = ['llama3.2:1b'];
-$systemPrompt = 'You are a helpful AI assistant. Be concise and helpful.';
+$systemPrompt = 'Be specific.';
 $maxTokens = 4096;
 
 // AUTH
 session_start();
 $authenticated = false;
 
-if (isset($_GET['pwd']) && hash_equals(ACCESS_PASSWORD, $_GET['pwd'])) {
+if (isset($_GET['pwd']) && is_string($_GET['pwd']) && hash_equals(ACCESS_PASSWORD, $_GET['pwd'])) {
     $_SESSION['chat_authenticated'] = true;
     header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?'));
     exit;
@@ -32,6 +32,11 @@ if (isset($_GET['logout'])) {
 
 // SSE
 if (isset($_GET['stream']) && $authenticated) {
+    if (!extension_loaded('curl')) {
+        header('Content-Type: text/event-stream');
+        echo "data: " . json_encode(['error' => 'Extensão PHP curl não instalada. Rode: pkg install php-curl']) . "\n\n";
+        exit;
+    }
     session_write_close();
     while (ob_get_level()) ob_end_clean();
     ob_implicit_flush(true);
@@ -71,7 +76,7 @@ if (isset($_GET['stream']) && $authenticated) {
             'Authorization: Bearer ' . $apiKey,
             'Accept: text/event-stream'
         ],
-        CURLOPT_TIMEOUT => 120,
+        CURLOPT_TIMEOUT => 0,
         CURLOPT_CONNECTTIMEOUT => 30,
         CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$buffer) {
             $buffer .= $data;
@@ -121,10 +126,7 @@ if (!$authenticated):
             margin: 0; background: #343541; color: #ececf1;
             min-height: 100dvh; display: grid; place-items: center; padding: 16px;
         }
-        form {
-            display: flex; flex-direction: column; gap: 2px;
-            width: min(300px, 90vw);
-        }
+        form { display: flex; flex-direction: column; gap: 2px; width: min(300px, 90vw); }
         input, button { padding: 10px; font-size: 16px; }
         input { background: #2a2b32; color: #ececf1; border: none; }
     </style>
@@ -154,7 +156,6 @@ endif;
 
         .app { display: flex; height: 100dvh; width: 100%; overflow: hidden; }
 
-        /* SIDEBAR */
         .sidebar {
             width: 200px; background: #202123; padding: 8px;
             display: flex; flex-direction: column; flex-shrink: 0;
@@ -176,7 +177,6 @@ endif;
         }
         .logout-btn { display: block; padding: 10px 4px; color: #ececf1; font-size: 13px; text-decoration: none; }
 
-        /* MAIN */
         .main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
         .header {
             display: flex; align-items: center; padding: 8px 10px;
@@ -202,7 +202,6 @@ endif;
         .model-opt { padding: 9px 12px; cursor: pointer; font-size: 13px; }
         .model-opt.active { color: #10a37f; }
 
-        /* CHAT */
         .chat-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
         .chat-messages { max-width: 768px; margin: 0 auto; padding: 16px; }
         .empty {
@@ -252,7 +251,6 @@ endif;
         }
         .error { background: rgba(255,77,77,0.1); color: #ff6b6b; padding: 10px 14px; margin: 10px 0; font-size: 13px; }
 
-        /* INPUT */
         .input-area {
             flex-shrink: 0; padding: 10px 14px;
             padding-bottom: calc(10px + env(safe-area-inset-bottom));
@@ -343,7 +341,16 @@ endif;
         let messages = [];
         let isStreaming = false;
         let currentModel = <?php echo json_encode($model); ?>;
-        let chatHistories = JSON.parse(localStorage.getItem('chatHistories') || '[]');
+        let chatHistories = [];
+        try {
+            const stored = localStorage.getItem('chatHistories');
+            if (stored) {
+                chatHistories = JSON.parse(stored);
+                if (!Array.isArray(chatHistories)) chatHistories = [];
+            }
+        } catch (e) {
+            chatHistories = [];
+        }
         let currentChatId = null;
         let abortController = null;
 
@@ -371,9 +378,7 @@ endif;
                 if (i % 2 === 1) {
                     let body = parts[i].slice(3, -3);
                     const nl = body.indexOf('\n');
-                    if (nl > 0 && nl < 20 && /^[a-zA-Z0-9+#-]+$/.test(body.slice(0, nl).trim())) {
-                        body = body.slice(nl + 1);
-                    }
+                    if (nl > 0 && nl < 20 && /^[a-zA-Z0-9+#-]+$/.test(body.slice(0, nl).trim())) body = body.slice(nl + 1);
                     html += '<div class="code-wrap"><button class="copy-btn" onclick="copyCode(this)">Copiar</button><pre><code>'
                           + escapeHtml(body.replace(/^\n+|\n+$/g, '')) + '</code></pre></div>';
                 } else {
@@ -382,9 +387,7 @@ endif;
                     t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
                     t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
                     t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, txt, url) =>
-                        /^(https?:\/\/|mailto:)/i.test(url)
-                            ? '<a href="' + url + '" target="_blank" rel="noopener">' + txt + '</a>'
-                            : m
+                        /^(https?:\/\/|mailto:)/i.test(url) ? '<a href="' + url + '" target="_blank" rel="noopener">' + txt + '</a>' : m
                     );
                     t = t.replace(/\n/g, '<br>');
                     html += t;
@@ -425,9 +428,7 @@ endif;
         function updateMessage(id, content, isFinal) {
             const el = document.querySelector('#' + id + ' .msg-content');
             if (!el) return;
-            el.innerHTML = isFinal
-                ? renderMarkdown(content)
-                : renderMarkdown(content) + '<span class="cursor"></span>';
+            el.innerHTML = isFinal ? renderMarkdown(content) : renderMarkdown(content) + '<span class="cursor"></span>';
             scrollToBottom();
         }
 
@@ -450,7 +451,14 @@ endif;
             if (idx >= 0) chatHistories[idx] = data;
             else chatHistories.unshift(data);
             chatHistories = chatHistories.slice(0, 50);
-            localStorage.setItem('chatHistories', JSON.stringify(chatHistories));
+            try {
+                localStorage.setItem('chatHistories', JSON.stringify(chatHistories));
+            } catch (e) {
+                if (chatHistories.length > 1) {
+                    chatHistories.pop();
+                    try { localStorage.setItem('chatHistories', JSON.stringify(chatHistories)); } catch (e2) {}
+                }
+            }
             renderHistory();
         }
 
@@ -461,8 +469,7 @@ endif;
                 const div = document.createElement('div');
                 div.className = 'chat-item' + (chat.id === currentChatId ? ' active' : '');
                 div.dataset.id = chat.id;
-                div.innerHTML = '<span class="chat-item-title">' + escapeHtml(chat.title) + '</span>'
-                              + '<button class="chat-del">×</button>';
+                div.innerHTML = '<span class="chat-item-title">' + escapeHtml(chat.title) + '</span><button class="chat-del">×</button>';
                 container.appendChild(div);
             });
         }
@@ -542,12 +549,7 @@ endif;
                         if (p.error) throw new Error(p.error);
                         if (p.content) {
                             acc += p.content;
-                            if (!rafId) {
-                                rafId = requestAnimationFrame(() => {
-                                    rafId = null;
-                                    updateMessage(msgId, acc);
-                                });
-                            }
+                            if (!rafId) rafId = requestAnimationFrame(() => { rafId = null; updateMessage(msgId, acc); });
                         }
                     }
                 }
@@ -604,7 +606,7 @@ endif;
                 if (confirm('Deletar esta conversa?')) {
                     const id = item.dataset.id;
                     chatHistories = chatHistories.filter(c => c.id !== id);
-                    localStorage.setItem('chatHistories', JSON.stringify(chatHistories));
+                    try { localStorage.setItem('chatHistories', JSON.stringify(chatHistories)); } catch (e2) {}
                     if (currentChatId === id) startNewChat();
                     else renderHistory();
                 }
