@@ -12,7 +12,7 @@ $baseUrl = 'http://127.0.0.1:11434/v1';
 $model   = 'llama3.2:1b';
 $allowedModels = ['llama3.2:1b'];
 $systemPrompt = 'Be specific.';
-$maxTokens = 4096;
+$maxTokens = 1096;
 
 // AUTH
 session_start();

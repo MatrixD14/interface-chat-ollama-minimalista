@@ -1,0 +1,37 @@
+#!/bin/bash
+case "$1" in
+    start)
+        if pgrep -f "ollama serve" >/dev/null; then
+            echo "Ollama inited"
+        else
+            ollama serve >/dev/null 2>&1 &
+            echo $! > "$HOME/.playchat_ollama.pid"
+        fi
+        if pgrep -f "php -d post_max_size=20M" >/dev/null; then
+            echo "PHP inited"
+        else
+            php -d post_max_size=20M \
+                -d upload_max_filesize=20M \
+                -S localhost:8001 >/dev/null 2>&1 &
+            echo $! > "$HOME/.playchat_php.pid"
+        fi
+        echo "init Chat http://localhost:8001/chat.php"
+        ;;
+    stop)
+        for service in ollama php; do
+            pidfile="$HOME/.playchat_${service}.pid"
+            if [ -f "$pidfile" ]; then
+                pid=$(cat "$pidfile")
+                kill -TERM "$pid" 2>/dev/null
+                rm -f "$pidfile"
+            else
+              pkill -TERM -f 'ollama serve'
+              pkill -TERM -f 'php -d post_max_size=20M'
+            fi
+        done
+        echo "Stoped"
+        ;;
+    *)
+        echo "Uso: $0 start|stop"
+        ;;
+esac
